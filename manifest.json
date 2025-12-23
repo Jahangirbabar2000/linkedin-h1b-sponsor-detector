@@ -1,0 +1,34 @@
+{
+    "manifest_version": 3,
+    "name": "LinkedIn H1B Sponsor Detection",
+    "version": "1.0.0",
+    "description": "Automatically detects H1B visa sponsorship availability in LinkedIn job postings",
+    "permissions": [
+        "activeTab"
+    ],
+    "host_permissions": [
+        "https://www.linkedin.com/*",
+        "https://linkedin.com/*"
+    ],
+    "content_scripts": [
+        {
+            "matches": [
+                "https://www.linkedin.com/jobs/*",
+                "https://linkedin.com/jobs/*"
+            ],
+            "js": [
+                "analyzer.js",
+                "badge.js",
+                "highlighter.js",
+                "content.js"
+            ],
+            "css": [
+                "styles.css"
+            ],
+            "run_at": "document_idle"
+        }
+    ],
+    "action": {
+        "default_title": "LinkedIn H1B Sponsor Detection"
+    }
+}
