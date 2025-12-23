@@ -25,8 +25,9 @@
       return true;
     }
 
-    // Check for direct job view page
-    if (path.match(/\/jobs\/view\/\d+/)) {
+    // Check for direct job view page (with or without trailing slash)
+    // Examples: /jobs/view/4345903518/ or /jobs/view/4345903518
+    if (path.match(/\/jobs\/view\/\d+\/?/)) {
       return true;
     }
 
@@ -54,8 +55,8 @@
       return jobIdFromQuery;
     }
 
-    // Try to extract from /jobs/view/{id}/ path
-    const viewMatch = path.match(/\/jobs\/view\/(\d+)/);
+    // Try to extract from /jobs/view/{id}/ path (with or without trailing slash)
+    const viewMatch = path.match(/\/jobs\/view\/(\d+)\/?/);
     if (viewMatch && viewMatch[1]) {
       return viewMatch[1];
     }

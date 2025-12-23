@@ -3,7 +3,7 @@
  * Creates and manages the sponsorship status badge overlay
  */
 
-const BadgeManager = (function() {
+const BadgeManager = (function () {
   'use strict';
 
   const BADGE_ID = 'h1b-sponsor-badge';
@@ -54,10 +54,10 @@ const BadgeManager = (function() {
    */
   function createTooltipText(analysisResult) {
     const { status, message, matchedKeywords, confidence } = analysisResult;
-    
+
     let tooltip = `${message}\n\n`;
     tooltip += `Confidence: ${confidence.toUpperCase()}\n\n`;
-    
+
     if (matchedKeywords.length > 0) {
       tooltip += `Matched keywords:\n${matchedKeywords.slice(0, 5).join(', ')}`;
       if (matchedKeywords.length > 5) {
@@ -66,7 +66,7 @@ const BadgeManager = (function() {
     } else {
       tooltip += 'No specific keywords found';
     }
-    
+
     return tooltip;
   }
 
@@ -78,13 +78,13 @@ const BadgeManager = (function() {
   function createBadge(analysisResult) {
     const { status, message } = analysisResult;
     const colors = getBadgeColors(status);
-    
+
     const badge = document.createElement('div');
     badge.id = BADGE_ID;
     badge.className = 'h1b-sponsor-badge';
     badge.setAttribute('data-status', status);
     badge.setAttribute('title', createTooltipText(analysisResult));
-    
+
     badge.style.cssText = `
       display: inline-flex;
       align-items: center;
@@ -103,7 +103,7 @@ const BadgeManager = (function() {
       z-index: 10000;
       position: relative;
     `;
-    
+
     // Icon
     const icon = document.createElement('span');
     icon.textContent = colors.icon;
@@ -111,25 +111,25 @@ const BadgeManager = (function() {
       font-size: 14px;
       font-weight: bold;
     `;
-    
+
     // Text
     const text = document.createElement('span');
     text.textContent = message;
-    
+
     badge.appendChild(icon);
     badge.appendChild(text);
-    
+
     // Hover effect
-    badge.addEventListener('mouseenter', function() {
+    badge.addEventListener('mouseenter', function () {
       this.style.transform = 'scale(1.05)';
       this.style.boxShadow = '0 4px 8px rgba(0, 0, 0, 0.15)';
     });
-    
-    badge.addEventListener('mouseleave', function() {
+
+    badge.addEventListener('mouseleave', function () {
       this.style.transform = 'scale(1)';
       this.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)';
     });
-    
+
     return badge;
   }
 
@@ -144,7 +144,11 @@ const BadgeManager = (function() {
       '.jobs-details__main-content .jobs-details-top-card', // Top card container
       '.jobs-search__job-details .jobs-details-top-card', // Search view top card
       '.jobs-details__main-content', // Main content area
-      '[data-job-id]' // Any element with job ID
+      '.jobs-details-top-card', // Top card (direct)
+      '.jobs-details__job-details-top-card', // Alternative top card selector
+      '[data-job-id]', // Any element with job ID
+      '.jobs-details__main-content header', // Header in main content
+      '.jobs-details__main-content > div:first-child' // First child of main content
     ];
 
     for (const selector of selectors) {
@@ -154,10 +158,48 @@ const BadgeManager = (function() {
       }
     }
 
-    // Fallback: look for job title text
-    const jobTitle = document.querySelector('h1[class*="job-title"], h2[class*="job-title"]');
-    if (jobTitle && jobTitle.parentElement) {
-      return jobTitle.parentElement;
+    // Fallback: look for job title text in various locations
+    const jobTitleSelectors = [
+      'h1[class*="job-title"]',
+      'h2[class*="job-title"]',
+      'h1.jobs-details-top-card__job-title',
+      'h1.jobs-details-top-card__job-title-lockup',
+      '.jobs-details-top-card h1',
+      '.jobs-details-top-card h2',
+      'h1',
+      'h2'
+    ];
+
+    for (const titleSelector of jobTitleSelectors) {
+      const jobTitle = document.querySelector(titleSelector);
+      if (jobTitle) {
+        // Try to find a parent container that makes sense
+        let parent = jobTitle.parentElement;
+        let depth = 0;
+        while (parent && depth < 5) {
+          // Look for a container with class containing "top-card", "header", or "title"
+          if (parent.classList && (
+            parent.classList.toString().includes('top-card') ||
+            parent.classList.toString().includes('header') ||
+            parent.classList.toString().includes('title') ||
+            parent.classList.toString().includes('job-details')
+          )) {
+            return parent;
+          }
+          parent = parent.parentElement;
+          depth++;
+        }
+        // If no good container found, use the title's immediate parent
+        if (jobTitle.parentElement) {
+          return jobTitle.parentElement;
+        }
+      }
+    }
+
+    // Last resort: try to find any main content area
+    const mainContent = document.querySelector('main, [role="main"], .jobs-details, .jobs-search__job-details');
+    if (mainContent) {
+      return mainContent;
     }
 
     return null;
@@ -166,15 +208,41 @@ const BadgeManager = (function() {
   /**
    * Inject badge into the page
    * @param {Object} analysisResult - Analysis result
+   * @param {number} retryCount - Number of retry attempts (internal use)
    * @returns {boolean} - True if badge was successfully injected
    */
-  function injectBadge(analysisResult) {
+  function injectBadge(analysisResult, retryCount = 0) {
     // Remove existing badge if present
     removeBadge();
 
     const container = findBadgeContainer();
     if (!container) {
-      console.warn('H1B Sponsor Extension: Could not find badge container');
+      // Retry up to 3 times with delays (LinkedIn loads content dynamically)
+      if (retryCount < 3) {
+        setTimeout(() => {
+          injectBadge(analysisResult, retryCount + 1);
+        }, 500 * (retryCount + 1)); // Increasing delay: 500ms, 1000ms, 1500ms
+        return false;
+      }
+      // After retries, try to inject at document body as last resort
+      const body = document.body;
+      if (body) {
+        const badge = createBadge(analysisResult);
+        const wrapper = document.createElement('div');
+        wrapper.id = BADGE_CONTAINER_ID;
+        wrapper.style.cssText = `
+          position: fixed;
+          top: 80px;
+          right: 20px;
+          z-index: 999999;
+          margin: 8px 0;
+          display: flex;
+          align-items: center;
+        `;
+        wrapper.appendChild(badge);
+        body.appendChild(wrapper);
+        return true;
+      }
       return false;
     }
 
@@ -198,7 +266,7 @@ const BadgeManager = (function() {
       display: flex;
       align-items: center;
     `;
-    
+
     badge.parentNode.insertBefore(wrapper, badge);
     wrapper.appendChild(badge);
 
@@ -211,11 +279,11 @@ const BadgeManager = (function() {
   function removeBadge() {
     const existingBadge = document.getElementById(BADGE_ID);
     const existingContainer = document.getElementById(BADGE_CONTAINER_ID);
-    
+
     if (existingBadge) {
       existingBadge.remove();
     }
-    
+
     if (existingContainer) {
       existingContainer.remove();
     }
@@ -236,12 +304,12 @@ const BadgeManager = (function() {
    */
   function updateBadge(analysisResult) {
     const existingBadge = document.getElementById(BADGE_ID);
-    
+
     if (existingBadge) {
       // Remove and re-inject for simplicity
       removeBadge();
     }
-    
+
     injectBadge(analysisResult);
   }
 

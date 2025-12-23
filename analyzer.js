@@ -32,7 +32,11 @@ const Analyzer = (function () {
     /\bO-1\s+visa\b/i,
     /\bL-1\s+visa\b/i,
     /\bJ-1\s+visa\b/i,
-    /\bOPT\s+to\s+H1B\b/i
+    /\bOPT\s+to\s+H1B\b/i,
+    /\bpleased\s+to\s+offer\s+visa\s+sponsorship\b/i,  // "pleased to offer visa sponsorship"
+    /\bpleased\s+to\s+offer\s+sponsorship\b/i,
+    /\boffer\s+visa\s+sponsorship\b/i,
+    /\boffer\s+sponsorship\b/i
   ];
 
   // Moderate Positive Indicators (implies openness) - Weight: +1
@@ -63,10 +67,8 @@ const Analyzer = (function () {
     /\bsponsorship\s+not\s+available\b/i,
     /\bno\s+visa\s+sponsorship\b/i,
     /\bmust\s+have\s+work\s+authorization\b/i,
-    /\bmust\s+be\s+authorized\s+to\s+work\s+in\s+the\s+U\.?S\.?\b/i,
-    /\bmust\s+be\s+authorized\s+to\s+work\s+in\s+the\s+United\s+States\b/i,  // "must be authorized to work in the United States"
-    /\bmust\s+be\s+currently\s+authorized\s+to\s+work\b/i,  // "must be currently authorized to work"
-    /\bmust\s+be\s+currently\s+authorized\s+to\s+work\s+in\s+the\s+(U\.?S\.?|United\s+States)\b/i,  // "must be currently authorized to work in the US/United States"
+    // Note: "must be authorized to work" is NOT a negative indicator by itself
+    // It's only negative when paired with "no sponsorship" - handled by context checking
     /\bno\s+visa\s+support\b/i,
     /\bwill\s+not\s+sponsor\b/i,
     /\bsponsorship\s+not\s+provided\b/i,
@@ -74,6 +76,14 @@ const Analyzer = (function () {
     /\bcitizenship\s+required\b/i,
     /\bU\.?S\.?\s+citizenship\s+mandatory\b/i,
     /\bsecurity\s+clearance\s+required\b/i,
+    /\bDOD\s+security\s+clearance\b/i,  // Department of Defense security clearance
+    /\bD\.?O\.?D\.?\s+security\s+clearance\b/i,  // DOD or D.O.D. security clearance
+    /\beligible\s+to\s+obtain\s+(a\s+)?(DOD|D\.?O\.?D\.?|security)\s+clearance\b/i,  // "eligible to obtain a DOD Security Clearance"
+    /\bmust\s+be\s+eligible\s+for\s+security\s+clearance\b/i,
+    /\bmust\s+obtain\s+security\s+clearance\b/i,
+    /\bable\s+to\s+obtain\s+security\s+clearance\b/i,
+    /\bclearance\s+eligible\b/i,
+    /\bsecurity\s+clearance\s+eligible\b/i,
     /\bmust\s+possess\s+U\.?S\.?\s+citizenship\b/i,
     /\bITAR\s+requirements?\b/i,  // ITAR (International Traffic in Arms Regulations) requirements
     /\bITAR\s+compliance\b/i,
@@ -87,13 +97,10 @@ const Analyzer = (function () {
   ];
 
   // Moderate Negative Indicators (likely exclusion) - Weight: -1
+  // Note: "authorized to work" phrases are NOT negative by themselves
+  // They're only negative when there's no positive sponsorship language
   const MODERATE_NEGATIVE_PATTERNS = [
-    /\bauthorized\s+to\s+work\s+in\s+the\s+U\.?S\.?\b/i,  // "authorized to work in the US" or "U.S."
-    /\bauthorized\s+to\s+work\s+in\s+the\s+United\s+States\b/i,  // "authorized to work in the United States"
-    /\bcurrently\s+authorized\s+to\s+work\s+in\s+the\s+(U\.?S\.?|United\s+States)\b/i,  // "currently authorized to work in the US/United States"
-    /\beligible\s+to\s+work\s+in\s+the\s+U\.?S\.?\b/i,
-    /\beligible\s+to\s+work\s+in\s+the\s+United\s+States\b/i,
-    /\blegally\s+authorized\s+to\s+work\b/i,
+    // Only include these if they appear with explicit "no sponsorship" context
     /\bno\s+relocation\s+assistance\b/i,
     /\blocal\s+candidates\s+only\b/i
   ];
@@ -176,14 +183,33 @@ const Analyzer = (function () {
 
     const text = jobDescription;
     const matchedKeywords = {
+      strongPositive: [],
+      moderatePositive: [],
       strongNegative: [],
       moderateNegative: []
     };
 
-    // Only check for negative indicators (explicit "no sponsorship" statements)
-    // If no negative patterns found, assume sponsorship is available
+    // First, check for POSITIVE indicators (explicit sponsorship offers)
+    // These override everything else
+    for (const pattern of STRONG_POSITIVE_PATTERNS) {
+      const matches = findMatches(pattern, text);
+      for (const match of matches) {
+        if (!isNegated(text, match.index, match.length)) {
+          matchedKeywords.strongPositive.push(match.text);
+        }
+      }
+    }
 
-    // Check strong negative indicators (explicit exclusion)
+    for (const pattern of MODERATE_POSITIVE_PATTERNS) {
+      const matches = findMatches(pattern, text);
+      for (const match of matches) {
+        if (!isNegated(text, match.index, match.length)) {
+          matchedKeywords.moderatePositive.push(match.text);
+        }
+      }
+    }
+
+    // Then check for NEGATIVE indicators (explicit "no sponsorship" statements)
     for (const pattern of STRONG_NEGATIVE_PATTERNS) {
       const matches = findMatches(pattern, text);
       for (const match of matches) {
@@ -191,7 +217,6 @@ const Analyzer = (function () {
       }
     }
 
-    // Check moderate negative indicators (likely exclusion)
     for (const pattern of MODERATE_NEGATIVE_PATTERNS) {
       const matches = findMatches(pattern, text);
       for (const match of matches) {
@@ -199,37 +224,54 @@ const Analyzer = (function () {
       }
     }
 
-    // Determine status based on negative indicators only
-    // If no negative patterns found → "Yes" (sponsorship likely available)
-    // If negative patterns found → "No" (sponsorship not available)
+    // Determine status: Positive indicators override negative ones
     let status, message, confidence;
 
-    if (matchedKeywords.strongNegative.length > 0) {
+    if (matchedKeywords.strongPositive.length > 0) {
+      // Explicit positive sponsorship language found - definitely yes
+      status = 'yes';
+      message = 'Sponsorship Available';
+      confidence = 'high';
+    } else if (matchedKeywords.strongNegative.length > 0) {
       // Strong negative indicators found - definitely no sponsorship
       status = 'no';
       message = 'No Sponsorship';
       confidence = 'high';
+    } else if (matchedKeywords.moderatePositive.length > 0) {
+      // Moderate positive indicators found - likely yes
+      status = 'yes';
+      message = 'Sponsorship Available';
+      confidence = 'medium';
     } else if (matchedKeywords.moderateNegative.length > 0) {
       // Only moderate negative indicators found - likely no sponsorship
       status = 'no';
       message = 'No Sponsorship';
       confidence = 'medium';
     } else {
-      // No negative indicators found - assume sponsorship is available
+      // No indicators found - default to yes (most jobs don't mention sponsorship)
       status = 'yes';
       message = 'Sponsorship Available';
-      confidence = 'medium'; // Medium confidence since we're inferring from absence of negatives
+      confidence = 'low'; // Low confidence since we're inferring from absence of indicators
     }
 
-    // Collect all matched keywords for display (only negative ones now)
+    // Collect all matched keywords for display
     const allMatchedKeywords = [
+      ...matchedKeywords.strongPositive,
+      ...matchedKeywords.moderatePositive,
       ...matchedKeywords.strongNegative,
       ...matchedKeywords.moderateNegative
     ];
 
+    // Calculate score for compatibility
+    let score = 0;
+    if (matchedKeywords.strongPositive.length > 0) score = 3;
+    else if (matchedKeywords.moderatePositive.length > 0) score = 1;
+    else if (matchedKeywords.strongNegative.length > 0) score = -3;
+    else if (matchedKeywords.moderateNegative.length > 0) score = -1;
+
     return {
       status,
-      score: matchedKeywords.strongNegative.length > 0 ? -3 : (matchedKeywords.moderateNegative.length > 0 ? -1 : 0), // Keep score for compatibility
+      score,
       confidence,
       matchedKeywords: [...new Set(allMatchedKeywords)], // Remove duplicates
       message,
